@@ -1,0 +1,45 @@
+name: Scheduled YouTube Polars ETL
+
+on:
+  schedule:
+    # Runs at minute 0 past every 6th hour (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allows manual trigger via GitHub UI button
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install polars tzdata google-cloud-bigquery google-api-python-client google-genai python-dotenv
+
+      - name: Write GCP Key from Secret
+        run: |
+          echo "${{ secrets.GCP_KEY_JSON }}" > gcp-key.json
+
+      - name: Execute Polars ETL Pipeline
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
+          GOOGLE_APPLICATION_CREDENTIALS: ./gcp-key.json
+        run: |
+          python etl_pipeline.py
+
+      - name: Clean up GCP Key
+        if: always()
+        run: |
+          rm -f gcp-key.json
