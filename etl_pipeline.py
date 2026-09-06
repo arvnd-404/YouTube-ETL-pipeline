@@ -52,59 +52,40 @@ def extract_trending_videos(api_key: str, region_code: str = "IN", max_results: 
     return extracted_data
 
 
-def enrich_with_gemini(api_key: str, videos: list) -> list:
-    """Enrich video titles in a single batch prompt using Gemini 3.6 Flash."""
+import time
+from google.genai.errors import APIError
+
+def enrich_with_gemini(api_key: str, raw_videos: list) -> list:
     print("🤖 [2/4] Enriching video metadata with Gemini API...")
     client = genai.Client(api_key=api_key)
     
-    batch_input = [{"id": v["video_id"], "title": v["title"]} for v in videos]
+    # Prepare prompt and payload
+    prompt = "..."  # your existing prompt logic
     
-    prompt = f"""
-    Analyze the following YouTube video titles. For each video, provide:
-    1. 'ai_category': Granular genre (e.g., Entertainment, Tech, Finance, Gaming, Politics, Music).
-    2. 'sentiment': Positive, Neutral, or Negative.
-    3. 'clickbait_score': Rating from 1 (completely factual) to 10 (extreme clickbait).
-    4. 'summary_tag': A 1-sentence analytical takeaway.
+    max_retries = 5
+    delay = 5  # Start with a 5-second wait
 
-    Input:
-    {json.dumps(batch_input)}
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",  # or your configured model
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
+            )
+            # If successful, parse response and return
+            return parse_gemini_response(response.text, raw_videos)
 
-    Return strictly a JSON array matching:
-    [
-      {{
-        "id": "video_id",
-        "ai_category": "string",
-        "sentiment": "string",
-        "clickbait_score": 5,
-        "summary_tag": "string"
-      }}
-    ]
-    """
-    
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json")
-    )
-    
-    ai_results = json.loads(response.text)
-    ai_lookup = {item["id"]: item for item in ai_results}
-    
-    now_iso = datetime.now(timezone.utc).isoformat()
-    enriched_records = []
-    for v in videos:
-        ai_meta = ai_lookup.get(v["video_id"], {})
-        enriched_records.append({
-            **v,
-            "ai_category": ai_meta.get("ai_category", "General"),
-            "sentiment": ai_meta.get("sentiment", "Neutral"),
-            "clickbait_score": int(ai_meta.get("clickbait_score", 5)),
-            "summary_tag": ai_meta.get("summary_tag", "Trending topic."),
-            "extracted_at": now_iso
-        })
-    
-    print("       ✅ AI categorization and sentiment enrichment completed.")
-    return enriched_records
+        except APIError as e:
+            if e.code in (503, 429) and attempt < max_retries:
+                print(f"⚠️ Gemini API busy ({e.code}). Retrying in {delay}s... (Attempt {attempt}/{max_retries})")
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff: 5s, 10s, 20s, 40s
+            else:
+                print(f"❌ Gemini enrichment failed: {e}")
+                # Fallback: return raw videos with default values so BigQuery ingestion doesn't fail
+                return fallback_enrichment(raw_videos)
 
 
 def transform_with_polars(records: list) -> pl.DataFrame:
