@@ -56,7 +56,6 @@ import time
 from google.genai.errors import APIError
 
 def fallback_enrichment(raw_videos: list) -> list:
-    """Provides sensible default values if Gemini API is unreachable or busy."""
     print("⚠️ Applying fallback enrichment values (Neutral / Score: 5 / Uncategorized)...")
     enriched = []
     for video in raw_videos:
@@ -64,6 +63,7 @@ def fallback_enrichment(raw_videos: list) -> list:
         v["sentiment"] = "Neutral"
         v["clickbait_score"] = 5
         v["ai_category"] = "Uncategorized"
+        v["extracted_at"] = datetime.now(timezone.utc).isoformat()  # <--- ADD THIS LINE
         enriched.append(v)
     return enriched
 
@@ -117,6 +117,7 @@ Videos:
                 item["sentiment"] = meta.get("sentiment", "Neutral")
                 item["clickbait_score"] = int(meta.get("clickbait_score", 5))
                 item["ai_category"] = meta.get("ai_category", "Uncategorized")
+                item["extracted_at"] = datetime.now(timezone.utc).isoformat()
                 enriched.append(item)
 
             print(f"       ✅ Successfully enriched {len(enriched)} video records.")
